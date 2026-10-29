@@ -45,11 +45,13 @@ is routed for it and skips it.
 - Bad, because a pass is now one actor run per board, so a scan makes more runs, each with its own small start fee.
 - Bad, because the plugin maps three actors' item shapes into the raw job shape the curation core reads, and a change to any of them needs a change in `lib/boards.mjs`.
 - Bad, because the ZipRecruiter rows tested carried no description, so those jobs are not cached locally and keep their board URL (see 0005).
+- Bad, because the ZipRecruiter rows tested carried no remote flag either, so in a remote-only pass a ZipRecruiter job is kept and tagged work arrangement unknown, as a LinkedIn job is.
 - Bad, because Glassdoor is no longer scanned by default.
 
 ## More Information
 
 Issue #83, including its test runs on 2026-10-26.
-Board routes, input builders and item mappers: `lib/boards.mjs:102-208`.
-Per-board loop and error handling: `lib/scan-apify.mjs:205-238`.
+Board routes, input builders and item mappers: `BOARDS` and `boardFor` in `lib/boards.mjs`.
+Per-board loop, status-row handling and error handling: `scanApify` in `lib/scan-apify.mjs`.
+Unknown work arrangement for LinkedIn and ZipRecruiter: `arrangementUnknown` in `lib/scan-apify-core.mjs`.
 Tests: `test/boards.test.mjs`, and `test/scan-apify.test.mjs`, "one actor run per routed board, and no agentx run".

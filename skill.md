@@ -50,14 +50,19 @@ URL and `_remote_url` is omitted. `Job` does not carry a `description`
 field; the cached file, when present, is the description. ZipRecruiter rows
 usually come without a description, so those jobs keep their board URL.
 
-A LinkedIn job with no remote signal that comes back from a remote-only pass
-skips `location_filter` and is kept with `note: 'work arrangement unknown'`.
-LinkedIn rows carry no remote flag, and the LinkedIn actor's remote-only
-filter is a text match, so the listing cannot say whether the role is
-remote. The host writes the note onto the `data/pipeline.md` row as
-`| note: work arrangement unknown`, for review. Indeed and ZipRecruiter jobs,
-jobs from an on-site pass, and jobs that say remote are filtered and tagged
-as before.
+A LinkedIn or ZipRecruiter job with no remote signal that comes back from a
+remote-only pass skips `location_filter` and is kept with
+`note: 'work arrangement unknown'`. LinkedIn and ZipRecruiter rows carry no
+remote flag, and the LinkedIn actor's remote-only filter is a text match, so
+the listing cannot say whether the role is remote. The host writes the note
+onto the `data/pipeline.md` row as `| note: work arrangement unknown`, for
+review. Indeed jobs, jobs from an on-site pass, and jobs that say remote are
+filtered and tagged as before.
+
+A dataset row with no title or URL is not a job. When ZipRecruiter blocks a
+run, its actor returns such a status row; the plugin drops it, logs its
+`__hint` and `per_site_status`, and still warns that the run returned 0
+items.
 
 ## Settings
 
@@ -85,7 +90,9 @@ arrive as `ctx.settings`):
 - `platforms`: boards to scan. Default `['LinkedIn', 'Indeed', 'ZipRecruiter']`.
   A board with no routed actor, such as Glassdoor, is logged and skipped.
 - `country`: country for the LinkedIn and Indeed searches, as a name or a
-  two-letter code. Default `'United States'`.
+  two-letter code. Default `'United States'`. A name not listed in
+  `lib/boards.mjs` is logged once per scan and not sent, so each actor's own
+  default country applies.
 - `posted_since`: recency window, mapped to each actor's date filter.
   Default `'14 days'`.
 
@@ -110,9 +117,10 @@ plugins:
 ## Cost
 
 Every run against Apify costs real money. Per result: about $0.00002 on
-LinkedIn, $0.004 on Indeed, and $0.005 on ZipRecruiter (about $0.011
-measured). A 5-title by 2-pass config over the three boards at
-`max_results: 25` is at most about $2.25 to $3.75 per run. Fewer titles,
+LinkedIn, $0.004 on Indeed, and $0.005 on ZipRecruiter. A 5-title by 2-pass
+config over the three boards at `max_results: 25` is at most about $2.26 per
+run, start fees included. Each ZipRecruiter run bills four start events at
+$0.00005 each, so a failed run still costs about $0.0002. Fewer titles,
 fewer passes, fewer `platforms`, and a lower `max_results` all lower the cost
 directly. See `README.md` for the full
 disclosure and how to size a run before scheduling it.

@@ -96,6 +96,10 @@ logged as an error and skipped, and the other boards in the pass still run.
 Apify's sync endpoint returns 408 after 300 seconds, so `300000` is also the
 highest useful value.
 
+`country` takes a two-letter code or one of the country names listed in
+`lib/boards.mjs`. Any other name is logged once per scan and not sent, so the
+LinkedIn and Indeed actors use their own default country.
+
 ## Usage
 
 ```bash
@@ -119,12 +123,13 @@ board's own bot-block. Otherwise `url` falls back to the original board URL
 and `_remote_url` is omitted. The ZipRecruiter actor returned no description
 in testing, so ZipRecruiter jobs usually keep their board URL.
 
-LinkedIn rows carry no remote flag, and the LinkedIn actor's remote-only
-filter is a text match, so a LinkedIn job from a remote-only pass with no
-remote signal cannot be classified from the listing. Rather than let `location_filter` drop
-it, the plugin keeps it and adds `note: 'work arrangement unknown'`, which
-career-ops writes onto the `data/pipeline.md` row as
-`| note: work arrangement unknown`. Everything else is filtered as before.
+LinkedIn and ZipRecruiter rows carry no remote flag, and the LinkedIn
+actor's remote-only filter is a text match, so a job from either board that
+comes back from a remote-only pass with no remote signal cannot be classified
+from the listing. Rather than let `location_filter` drop it, the plugin keeps
+it and adds `note: 'work arrangement unknown'`, which career-ops writes onto
+the `data/pipeline.md` row as `| note: work arrangement unknown`. Everything
+else is filtered as before.
 
 ## Boards and cost
 
@@ -136,14 +141,15 @@ are from each actor's Apify Store page as of 2026-10-27:
 | ------------ | -------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | LinkedIn     | [`johnvc/linkedin-jobs-api`](https://apify.com/johnvc/linkedin-jobs-api)         | about $0.00002 ($0.00001 per job plus $0.00001 per stored row)    |
 | Indeed       | [`johnvc/indeed-jobs-api`](https://apify.com/johnvc/indeed-jobs-api)             | $0.004 per job on the free tier, down to $0.00343 on higher tiers |
-| ZipRecruiter | [`openclawai/job-board-scraper`](https://apify.com/openclawai/job-board-scraper) | $0.005 per job (about $0.011 measured in issue #83)               |
+| ZipRecruiter | [`openclawai/job-board-scraper`](https://apify.com/openclawai/job-board-scraper) | $0.005 per job                                                    |
 | Glassdoor    | none                                                                             | not scanned: no tested actor returned Glassdoor results           |
 
 There is no monthly rental; every run costs money. For a 5-title by 2-pass
 configuration at `max_results: 25`, the worst case is 250 results per board:
-about $0.005 on LinkedIn, $1.00 on Indeed and $1.25 to $2.75 on ZipRecruiter,
-so about $2.25 to $3.75 per run. Real runs return fewer results than the cap.
-The levers that lower cost are:
+about $0.005 on LinkedIn, $1.00 on Indeed and $1.25 on ZipRecruiter, so about
+$2.26 per run with start fees. Each ZipRecruiter run bills four start events
+at $0.00005 each, so a run that fails or is blocked still costs about $0.0002.
+Real runs return fewer results than the cap. The levers that lower cost are:
 
 - `max_results`: the result cap per board per pass. The worst case for a run
   is `titles * passes * boards * max_results` results.
@@ -155,9 +161,12 @@ The levers that lower cost are:
 
 On Apify's free plan an actor can stop returning results once it reaches a
 free-plan limit. The run still succeeds, so the plugin logs a warning naming
-the title, pass and board for every run that returns 0 items. Verify current
-pricing on each actor's Apify Store page before budgeting, since Apify
-publishers can change it.
+the title, pass and board for every run that returns 0 items. A row with no
+title or URL is not counted as an item: when ZipRecruiter blocks a run, the
+ZipRecruiter actor returns a status row instead of jobs, and the plugin drops
+it and logs its `__hint` and `per_site_status`. Verify current pricing on each
+actor's Apify Store page before budgeting, since Apify publishers can change
+it.
 
 ## Development
 

@@ -91,7 +91,8 @@ section('yearlySalary');
 check(yearlySalary(150000, 'YEARLY') === 150000, 'keeps a yearly figure');
 check(yearlySalary(50, 'HOURLY') === 104000, 'scales an hourly figure by 2080 hours');
 check(yearlySalary(10000, 'monthly') === 120000, 'scales a monthly figure, any case');
-check(yearlySalary(150000) === 150000, 'treats a missing period as yearly');
+check(yearlySalary(150000) === null, 'returns null when no period is posted');
+check(yearlySalary(90, '') === null, 'returns null for an empty period');
 check(yearlySalary(null, 'YEARLY') === null, 'returns null when no amount is posted');
 check(yearlySalary(0, 'YEARLY') === null, 'returns null for a zero amount');
 check(yearlySalary('n/a', 'YEARLY') === null, 'returns null for a non-numeric amount');
@@ -243,6 +244,15 @@ check(
   BOARDS.Indeed.mapItem({ isRemote: true, workModel: 'Hybrid work' }).is_remote === false,
   'a hybrid role is not treated as remote',
 );
+{
+  // An hourly figure with no period must not read as $90 a year, which any
+  // salary_floor would drop.
+  const job = BOARDS.Indeed.mapItem({ jobTitle: 'VP Marketing', salaryMin: 90, salaryMax: 110 });
+  check(
+    job.salary_minimum === null && job.salary_maximum === null,
+    'a salary with no period is left unset',
+  );
+}
 
 // ── ZipRecruiter ─────────────────────────────────────────────────────
 section('ZipRecruiter buildInput');
@@ -287,7 +297,7 @@ section('ZipRecruiter mapItem');
   check(job.location === 'Plano, TX', 'keeps the location string');
   check(job.platform_url === 'https://example.com/ziprecruiter/1', 'maps job_url to platform_url');
   check(job.platform === 'ZipRecruiter', 'sets platform to ZipRecruiter');
-  check(job.is_remote === false, 'no remote flag means not flagged remote');
+  check(job.is_remote === null, 'no remote flag means is_remote null, as for LinkedIn');
   check(job.salary_minimum === null && job.salary_maximum === null, 'no salary means null');
   check(job.description === '', 'no description means an empty one');
 }
@@ -302,6 +312,25 @@ section('ZipRecruiter mapItem');
   check(job.is_remote === true, 'maps is_remote when present');
   check(job.salary_minimum === 180000 && job.salary_maximum === 220000, 'maps a salary');
   check(job.description === DESCRIPTION, 'maps a description when present');
+}
+check(
+  BOARDS.ZipRecruiter.mapItem({ title: 'VP Marketing', is_remote: false }).is_remote === false,
+  'keeps an is_remote of false when the actor sends one',
+);
+{
+  // The status row the actor returns when ZipRecruiter's anti-bot check
+  // blocks the run. Values are synthetic.
+  const job = BOARDS.ZipRecruiter.mapItem({
+    __hint: 'ZipRecruiter blocked the request',
+    per_site_status: { zip_recruiter: 'blocked' },
+    search_term: 'VP Marketing',
+    location: 'Dallas, TX',
+    scraped_at: '2026-10-27T00:00:00Z',
+  });
+  check(
+    job.title === '' && job.platform_url === '',
+    'a status row maps to a job with no title or URL, which the engine drops',
+  );
 }
 
 // ── Every board ──────────────────────────────────────────────────────

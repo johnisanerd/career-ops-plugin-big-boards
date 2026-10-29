@@ -19,8 +19,9 @@
  * list), JD caching (cacheJobDescription), the description -> local-url
  * mapping (toJob), and the end-to-end engine (scanApify): token handling,
  * required titles, one actor run per routed board (lib/boards.mjs),
- * per-pass and per-board resilience, cross-title dedup, and that no
- * 1Password / raw sockets / global fetch made it into the source.
+ * ZipRecruiter status rows, an unmapped country, per-pass and per-board
+ * resilience, cross-title dedup, and that no 1Password / raw sockets /
+ * global fetch made it into the source.
  *
  * The fake fetchJson answers each board's endpoint with rows in that board's
  * own item shape (boardItem below), so every engine test also runs the
@@ -610,6 +611,140 @@ await withTmpCwd(async () => {
   check(logs[0]?.includes('[remote]'), 'the warning is for the empty remote pass');
 });
 
+// ── ZipRecruiter rows as openclawai/job-board-scraper returns them ──
+// Field names as the actor returned them for issue #83 and the review of PR
+// #84; values are synthetic. A job row has no remote flag, description or
+// salary. When ZipRecruiter's anti-bot check blocks the run, the actor
+// returns a status row instead, with no title or job_url.
+const ZIP_ROW = {
+  title: 'VP Marketing',
+  company: 'Initech Cloud',
+  location: 'Tulsa, OK',
+  job_url: 'https://example.com/ziprecruiter/1',
+  site: 'zip_recruiter',
+};
+const ZIP_STATUS_ROW = {
+  __hint: 'ZipRecruiter blocked the request. Try again later.',
+  per_site_status: { zip_recruiter: 'blocked' },
+  search_term: 'VP Marketing',
+  location: 'Dallas, TX',
+  scraped_at: '2026-10-27T00:00:00Z',
+};
+/** A fake ctx.fetchJson that answers the ZipRecruiter endpoint with `rows`,
+ *  as given, and every other board with nothing. */
+const zipOnly = (rows) => async (url) => (platformOf(url) === 'ZipRecruiter' ? rows : []);
+const zipSettings = {
+  titles: ['VP Marketing'],
+  platforms: ['ZipRecruiter'],
+  ...permissiveConfig(['VP Marketing']),
+};
+
+section('scanApify: a ZipRecruiter status row is not a job');
+await withTmpCwd(async () => {
+  const logs = [];
+  const ctx = {
+    env: { APIFY_TOKEN: 'tok' },
+    settings: zipSettings,
+    log: (msg) => logs.push(msg),
+    fetchJson: zipOnly([ZIP_STATUS_ROW]),
+  };
+  const jobs = await scanApify(ctx);
+  check(jobs.length === 0, 'a run that returned only a status row returns no job');
+  check(
+    logs.some((l) => /ZipRecruiter returned 0 items/.test(l)),
+    'the 0-items warning fires, since the status row is dropped before counting',
+  );
+  const status = logs.find((l) => l.includes('status row'));
+  check(
+    !!status && status.includes('__hint: ZipRecruiter blocked the request. Try again later.'),
+    "logs the status row's __hint",
+  );
+  check(
+    !!status && status.includes('per_site_status: {"zip_recruiter":"blocked"}'),
+    "logs the status row's per_site_status",
+  );
+  check(
+    !!status && status.includes('VP Marketing [remote] ZipRecruiter'),
+    'the status log names the title, pass and board',
+  );
+});
+await withTmpCwd(async () => {
+  const logs = [];
+  const ctx = {
+    env: { APIFY_TOKEN: 'tok' },
+    settings: zipSettings,
+    log: (msg) => logs.push(msg),
+    fetchJson: zipOnly([ZIP_STATUS_ROW, ZIP_ROW]),
+  };
+  const jobs = await scanApify(ctx);
+  check(
+    jobs.length === 1 && jobs[0].company === 'Initech Cloud',
+    'a real row next to a status row is still returned',
+  );
+  check(
+    !logs.some((l) => /returned 0 items/.test(l)),
+    'no 0-items warning when the run also returned a job',
+  );
+});
+await withTmpCwd(async () => {
+  const logs = [];
+  const ctx = {
+    env: { APIFY_TOKEN: 'tok' },
+    settings: zipSettings,
+    log: (msg) => logs.push(msg),
+    fetchJson: zipOnly([{ search_term: 'VP Marketing', location: 'Dallas, TX' }]),
+  };
+  const jobs = await scanApify(ctx);
+  check(jobs.length === 0, 'a row with no title or URL and no status fields is dropped too');
+  check(!logs.some((l) => l.includes('status row')), 'and is not logged as a status row');
+});
+
+section('scanApify: a country it cannot map is logged once');
+await withTmpCwd(async () => {
+  const logs = [];
+  const calls = [];
+  const ctx = {
+    env: { APIFY_TOKEN: 'tok' },
+    settings: {
+      titles: ['VP Marketing', 'CMO'],
+      country: 'Atlantis',
+      platforms: ['LinkedIn'],
+      ...permissiveConfig(['VP Marketing', 'CMO']),
+    },
+    log: (msg) => logs.push(msg),
+    fetchJson: boardFetch({ LinkedIn: [rawJob()] }, calls),
+  };
+  await scanApify(ctx);
+  const countryLogs = logs.filter((l) => l.includes('"Atlantis"'));
+  check(countryLogs.length === 1, 'logs the country once per scan, not once per title');
+  check(/default country/.test(countryLogs[0] || ''), "says the actor's default country applies");
+  check(
+    calls.length === 2 && calls.every((c) => !('country' in c.input)),
+    'sends no country to the actor',
+  );
+});
+for (const country of ['Canada', 'gb', undefined]) {
+  await withTmpCwd(async () => {
+    const logs = [];
+    const ctx = {
+      env: { APIFY_TOKEN: 'tok' },
+      settings: {
+        titles: ['VP Marketing'],
+        country,
+        platforms: ['LinkedIn'],
+        ...permissiveConfig(['VP Marketing']),
+      },
+      log: (msg) => logs.push(msg),
+      fetchJson: boardFetch({ LinkedIn: [rawJob()] }),
+    };
+    await scanApify(ctx);
+    check(
+      !logs.some((l) => /default country/.test(l)),
+      `no country log for ${country ?? 'the default country'}`,
+    );
+  });
+}
+
 section('scanApify: resilience, one failed pass does not abort the run');
 await withTmpCwd(async () => {
   const logs = [];
@@ -789,6 +924,32 @@ await withTmpCwd(async () => {
     jobs[0]?.location === 'Greater Cleveland',
     'the location text is left as the board gave it',
   );
+});
+
+section('scanApify: remote-only pass keeps and tags ZipRecruiter jobs with no remote flag');
+await withTmpCwd(async () => {
+  // Tulsa is outside the city list, and the row says nothing about remote.
+  const ctx = {
+    env: { APIFY_TOKEN: 'tok' },
+    settings: dfwSettings([{ label: 'remote', remote_only: true }], ['ZipRecruiter']),
+    fetchJson: zipOnly([ZIP_ROW]),
+  };
+  const jobs = await scanApify(ctx);
+  check(jobs.length === 1, 'keeps the ZipRecruiter job the city filter would have dropped');
+  check(jobs[0]?.note === UNKNOWN_ARRANGEMENT_NOTE, 'tags it work arrangement unknown');
+  check(
+    jobs[0]?.url === 'https://example.com/ziprecruiter/1',
+    'keeps its board URL, since the row has no description',
+  );
+});
+await withTmpCwd(async () => {
+  const ctx = {
+    env: { APIFY_TOKEN: 'tok' },
+    settings: dfwSettings([{ label: 'onsite', location: 'Tulsa, OK' }], ['ZipRecruiter']),
+    fetchJson: zipOnly([ZIP_ROW]),
+  };
+  const jobs = await scanApify(ctx);
+  check(jobs.length === 0, 'an on-site pass still drops the same job for location');
 });
 
 section('scanApify: on-site pass is unchanged');
